@@ -1,0 +1,174 @@
+package com.asphaltclone;
+
+import com.jme3.app.SimpleApplication;
+import com.jme3.bullet.BulletAppState;
+import com.jme3.bullet.PhysicsSpace;
+import com.jme3.light.DirectionalLight;
+import com.jme3.math.ColorRGBA;
+import com.jme3.math.Vector3f;
+import com.jme3.renderer.RenderManager;
+import com.jme3.scene.Node;
+
+public class Main extends SimpleApplication {
+
+    private BulletAppState bulletAppState;
+    private PlayerCar playerCar;
+    private AICar aiCar;
+    private TrackManager track;
+    private RaceManager raceManager;
+    private HUD hud;
+
+    public static void main(String[] args) {
+        Main app = new Main();
+        app.start();
+    }
+
+    @Override
+    public void simpleInitApp() {
+        // Physics setup
+        bulletAppState = new BulletAppState();
+        stateManager.attach(bulletAppState);
+
+        // Lighting
+        DirectionalLight sun = new DirectionalLight();
+        sun.setDirection(new Vector3f(-0.5f, -1f, -0.3f));
+        sun.setColor(ColorRGBA.White.mult(1.3f));
+        rootNode.addLight(sun);
+
+        // Scene
+        track = new TrackManager(assetManager, rootNode, bulletAppState.getPhysicsSpace());
+        playerCar = new PlayerCar(assetManager, bulletAppState.getPhysicsSpace(), new Vector3f(0, 2, 0));
+        aiCar = new AICar(assetManager, bulletAppState.getPhysicsSpace(), new Vector3f(0, 2, -10));
+        raceManager = new RaceManager(playerCar, aiCar);
+        hud = new HUD(guiNode, guiFont, playerCar);
+
+        cam.setLocation(new Vector3f(0, 5, 15));
+        flyCam.setEnabled(false);
+    }
+
+    @Override
+    public void simpleUpdate(float tpf) {
+        raceManager.update(tpf);
+        hud.update();
+    }
+
+    @Override
+    public void simpleRender(RenderManager rm) {}
+}
+package com.asphaltclone;
+
+import com.jme3.asset.AssetManager;
+import com.jme3.bullet.PhysicsSpace;
+import com.jme3.bullet.control.VehicleControl;
+import com.jme3.bullet.objects.VehicleWheel;
+import com.jme3.material.Material;
+import com.jme3.math.Vector3f;
+import com.jme3.scene.Geometry;
+import com.jme3.scene.Node;
+import com.jme3.scene.shape.Box;
+
+public class PlayerCar {
+    private Node carNode;
+    private VehicleControl carControl;
+    private float nitro = 100;
+
+    public PlayerCar(AssetManager assetManager, PhysicsSpace physicsSpace, Vector3f startPos) {
+        Box chassisBox = new Box(1, 0.5f, 2);
+        Geometry chassisGeom = new Geometry("CarChassis", chassisBox);
+        Material mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+        mat.setBoolean("UseMaterialColors", true);
+        mat.setColor("Diffuse", com.jme3.math.ColorRGBA.Red);
+        chassisGeom.setMaterial(mat);
+
+        carNode = new Node("PlayerCar");
+        carNode.attachChild(chassisGeom);
+        chassisGeom.setLocalTranslation(0, 1, 0);
+
+        carControl = new VehicleControl(new com.jme3.bullet.collision.shapes.BoxCollisionShape(new Vector3f(1, 0.5f, 2)), 1200);
+        carNode.addControl(carControl);
+
+        carControl.setSuspensionCompression(0.3f);
+        carControl.setSuspensionDamping(0.5f);
+        carControl.setMaxSuspensionTravelCm(500);
+        carControl.setFrictionSlip(5f);
+
+        // Wheels
+        Vector3f wheelDir = new Vector3f(0, -1, 0);
+        Vector3f wheelAxle = new Vector3f(-1, 0, 0);
+        float radius = 0.4f;
+        carControl.addWheel(new VehicleWheel(new com.jme3.bullet.objects.VehicleWheel(chassisGeom, wheelDir, wheelAxle, 0.2f, radius, true)));
+        
+        carNode.setLocalTranslation(startPos);
+        physicsSpace.add(carControl);
+    }
+
+    public void accelerate(float value) {
+        carControl.accelerate(value);
+    }
+
+    public void steer(float value) {
+        carControl.steer(value);
+    }
+
+    public void update(float tpf, boolean nitroOn) {
+        if (nitroOn && nitro > 0) {
+            carControl.accelerate(1500f);
+            nitro -= tpf * 10;
+        } else {
+            nitro = Math.min(100, nitro + tpf * 5);
+        }
+    }
+
+    public float getSpeed() {
+        return carControl.getCurrentVehicleSpeedKmHour();
+    }
+
+    public float getNitro() {
+        return nitro;
+    }
+
+    public Node getNode() {
+        return carNode;
+    }
+}
+package com.asphaltclone;
+
+import com.jme3.asset.AssetManager;
+import com.jme3.bullet.PhysicsSpace;
+import com.jme3.bullet.control.RigidBodyControl;
+import com.jme3.material.Material;
+import com.jme3.math.ColorRGBA;
+import com.jme3.scene.Geometry;
+import com.jme3.scene.Node;
+import com.jme3.scene.shape.Box;
+
+public class TrackManager {
+    public TrackManager(AssetManager assetManager, Node rootNode, PhysicsSpace physicsSpace) {
+        Box trackBox = new Box(20, 0.2f, 200);
+        Geometry trackGeom = new Geometry("Track", trackBox);
+        Material mat = new Material(assetManager, "Common/MatDefs/Light/Lighting.j3md");
+        mat.setBoolean("UseMaterialColors", true);
+        mat.setColor("Diffuse", ColorRGBA.Gray);
+        trackGeom.setMaterial(mat);
+
+        RigidBodyControl trackPhys = new RigidBodyControl(0);
+        trackGeom.addControl(trackPhys);
+        rootNode.attachChild(trackGeom);
+        physicsSpace.add(trackPhys);
+    }
+}
+package com.asphaltclone;
+
+public class RaceManager {
+    private PlayerCar playerCar;
+    private AICar aiCar;
+
+    public RaceManager(PlayerCar p, AICar a) {
+        playerCar = p;
+        aiCar = a;
+    }
+
+    public void update(float tpf) {
+        aiCar.followPath(tpf);
+    }
+}
